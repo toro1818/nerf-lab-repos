@@ -80,7 +80,10 @@ class SpatialEncoder(nn.Module):
         # CBAM
         self.use_cbam = use_cbam
         if self.use_cbam:
-            self.CBAMLayer = CBAMLayer(self.latent_size)
+            self.CBAMLists = nn.ModuleList()
+            for i in range(num_layers):
+                latent = [64, 64, 128, 256, 512, 1024][i]
+                self.CBAMLists.append(CBAMLayer(latent))
         # self.latent (B, L, H, W)
 
     def index(self, uv, cam_z=None, image_size=(), z_bounds=None):
@@ -160,6 +163,9 @@ class SpatialEncoder(nn.Module):
             align_corners = None if self.index_interp == "nearest " else True
             latent_sz = latents[0].shape[-2:]
             for i in range(len(latents)):
+                # CBAM
+                if self.use_cbam:
+                    latents[i] = self.CBAMLists[i](latents[i])  # [B,C,H/2,W/2] C:64,64,128,256
                 latents[i] = F.interpolate(
                     latents[i],
                     latent_sz,
@@ -167,9 +173,9 @@ class SpatialEncoder(nn.Module):
                     align_corners=align_corners,
                 )
             self.latent = torch.cat(latents, dim=1)
-        # CBAM
-        if self.use_cbam:
-            self.latent = self.CBAMLayer(self.latent)  # [B,512,H/2,W/2]
+        # # CBAM
+        # if self.use_cbam:
+        #     self.latent = self.CBAMLayer(self.latent)  # [B,512,H/2,W/2]
         # TODO 我知道是归一化，但是这里第三步看不懂
         self.latent_scaling[0] = self.latent.shape[-1]
         self.latent_scaling[1] = self.latent.shape[-2]

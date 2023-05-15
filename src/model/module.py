@@ -27,7 +27,8 @@ class CBAMLayer(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        max_out = self.mlp(self.max_pool(x))
+        a = self.max_pool(x)
+        max_out = self.mlp(a)
         avg_out = self.mlp(self.avg_pool(x))
         channel_out = self.sigmoid(max_out + avg_out)
         x = channel_out * x
