@@ -35,7 +35,7 @@ class Conv2d(nn.Module):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 relu=True, bn=True, bn_momentum=0.1, init_method="xavier", **kwargs):
+                 relu=True, bn=True, bn_momentum=0.1, init_method="xavier",**kwargs):
         super(Conv2d, self).__init__()
 
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride,
@@ -44,6 +44,7 @@ class Conv2d(nn.Module):
         self.stride = stride
         self.bn = nn.BatchNorm2d(out_channels, momentum=bn_momentum) if bn else None
         self.relu = relu
+
 
         # assert init_method in ["kaiming", "xavier"]
         # self.init_weights(init_method)

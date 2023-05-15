@@ -1,3 +1,4 @@
+# coding:utf-8
 """
 Implements image encoders
 """
@@ -8,7 +9,7 @@ import torchvision
 import src.util as util
 from src.model.custom_encoder import ConvEncoder
 import torch.autograd.profiler as profiler
-
+from src.model.module import CBAMLayer
 
 class SpatialEncoder(nn.Module):
     """
@@ -26,6 +27,7 @@ class SpatialEncoder(nn.Module):
         feature_scale=1.0,
         use_first_pool=True,
         norm_type="batch",
+        use_cbam=False
     ):
         """
         :param backbone Backbone network. Either custom, in which case
@@ -75,6 +77,10 @@ class SpatialEncoder(nn.Module):
         self.register_buffer(
             "latent_scaling", torch.empty(2, dtype=torch.float32), persistent=False
         )
+        # CBAM
+        self.use_cbam = use_cbam
+        if self.use_cbam:
+            self.CBAMLayer = CBAMLayer(self.latent_size)
         # self.latent (B, L, H, W)
 
     def index(self, uv, cam_z=None, image_size=(), z_bounds=None):
@@ -91,7 +97,7 @@ class SpatialEncoder(nn.Module):
             if uv.shape[0] == 1 and self.latent.shape[0] > 1:
                 uv = uv.expand(self.latent.shape[0], -1, -1)
 
-            # ÒòÎª´Ë´¦Ê¹ÓÃtorch.nn.functional.grid_sample½øĞĞ²ÉÑù£¬×ø±êĞèÒª½øĞĞ¹éÒ»»¯£¬ËùÒÔuv×ø±êĞèÒª¡Â(H,W) TODO
+            # å› ä¸ºæ­¤å¤„ä½¿ç”¨torch.nn.functional.grid_sampleè¿›è¡Œé‡‡æ ·ï¼Œåæ ‡éœ€è¦è¿›è¡Œå½’ä¸€åŒ–ï¼Œæ‰€ä»¥uvåæ ‡éœ€è¦Ã·(H,W) TODO
             with profiler.record_function("encoder_index_pre"):
                 if len(image_size) > 0:
                     if len(image_size) == 1:
@@ -107,6 +113,7 @@ class SpatialEncoder(nn.Module):
                 mode=self.index_interp,
                 padding_mode=self.index_padding,
             )
+
             # sample.shape (NB*NV,latent_size,ray_batch_size*sample,1)=(9,512,8192,1)
             return samples[:, :, :, 0]  # (B, C, N)
 
@@ -160,10 +167,13 @@ class SpatialEncoder(nn.Module):
                     align_corners=align_corners,
                 )
             self.latent = torch.cat(latents, dim=1)
-        # TODO ÎÒÖªµÀÊÇ¹éÒ»»¯£¬µ«ÊÇÕâÀïµÚÈı²½¿´²»¶®
+        # CBAM
+        if self.use_cbam:
+            self.latent = self.CBAMLayer(self.latent)  # [B,512,H/2,W/2]
+        # TODO æˆ‘çŸ¥é“æ˜¯å½’ä¸€åŒ–ï¼Œä½†æ˜¯è¿™é‡Œç¬¬ä¸‰æ­¥çœ‹ä¸æ‡‚
         self.latent_scaling[0] = self.latent.shape[-1]
         self.latent_scaling[1] = self.latent.shape[-2]
-        self.latent_scaling = self.latent_scaling / (self.latent_scaling - 1) * 2.0  # Ã»ÓĞ¿´¶®
+        self.latent_scaling = self.latent_scaling / (self.latent_scaling - 1) * 2.0  # æ²¡æœ‰çœ‹æ‡‚
         return self.latent
 
     @classmethod
@@ -177,6 +187,7 @@ class SpatialEncoder(nn.Module):
             upsample_interp=conf.get_string("upsample_interp", "bilinear"),
             feature_scale=conf.get_float("feature_scale", 1.0),
             use_first_pool=conf.get_bool("use_first_pool", True),
+            use_cbam=conf.get_bool("use_cbam", True)
         )
 
 
@@ -200,6 +211,7 @@ class ImageEncoder(nn.Module):
         self.latent_size = latent_size
         if latent_size != 512:
             self.fc = nn.Linear(512, latent_size)
+
 
     def index(self, uv, cam_z=None, image_size=(), z_bounds=()):
         """
@@ -233,6 +245,7 @@ class ImageEncoder(nn.Module):
             x = self.fc(x)
 
         self.latent = x  # (B, latent_size)
+
         return self.latent
 
     @classmethod
