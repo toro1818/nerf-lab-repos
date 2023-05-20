@@ -229,3 +229,49 @@ class UNet(nn.Module):
         return self.latent
 
 
+class UNet4transformer(nn.Module):
+    """Applies a U-net to Extract images' feature for cascade
+
+       :Parm:
+           base_channels: u-net base channels
+
+    """
+    def __init__(self, base_channels=8, ):
+        super(UNet4transformer, self).__init__()
+        self.conv0 = nn.Sequential(
+            Conv2d(3, base_channels, 3, stride=1, padding=1),
+            Conv2d(base_channels, base_channels, 3, stride=1, padding=1)
+        )
+        self.conv1 = nn.Sequential(
+            Conv2d(base_channels, base_channels * 2, 5, stride=2, padding=2),
+            Conv2d(base_channels * 2, base_channels * 2, 3, 1, padding=1),
+            Conv2d(base_channels * 2, base_channels * 2, 3, 1, padding=1)
+        )
+        self.conv2 = nn.Sequential(
+            Conv2d(base_channels * 2, base_channels * 4, 5, stride=2, padding=2),
+            Conv2d(base_channels * 4, base_channels * 4, 3, 1, padding=1),
+            Conv2d(base_channels * 4, base_channels * 4, 3, 1, padding=1)
+        )
+        self.out1 = nn.Conv2d(base_channels * 4, base_channels * 4, 1, bias=False)
+        self.out_channels = [4 * base_channels]
+        self.deconv1 = DeConv2dFuse(base_channels * 4, base_channels * 2, 3)
+        self.deconv2 = DeConv2dFuse(base_channels * 2, base_channels, 3)
+
+        self.out2 = nn.Conv2d(base_channels * 2, base_channels * 2, 1, bias=False)
+        self.out3 = nn.Conv2d(base_channels, base_channels, 1, bias=False)
+        self.out_channels.append(2 * base_channels)
+        self.out_channels.append(base_channels)
+
+    def forward(self, x):
+        conv0 = self.conv0(x)
+        conv1 = self.conv1(conv0)
+        conv2 = self.conv2(conv1)
+        pre_features = conv2
+        outputs = {}
+        outputs["stage1"] = self.out1(pre_features)
+        pre_features = self.deconv1(conv1, pre_features)
+        outputs["stage2"] = self.out2(pre_features)
+        pre_features = self.deconv2(conv0, pre_features)
+        outputs["stage3"] = self.out3(pre_features)
+
+        return outputs

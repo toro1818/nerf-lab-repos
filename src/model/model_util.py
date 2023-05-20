@@ -1,4 +1,4 @@
-from .encoder import SpatialEncoder, ImageEncoder
+from .encoder import SpatialEncoder, ImageEncoder, TransformerEncoder
 from .mlp import ImplicitNet
 from .resnetfc import ResnetFC
 from .img_encoder import UNet
@@ -18,13 +18,15 @@ def make_mlp(conf, d_in, d_latent=0, allow_empty=False, **kwargs):
 
 
 def make_encoder(conf, **kwargs):
-    enc_type = conf.get_string("type", "spatial")  # spatial | global
+    enc_type = conf.get_string("type", "spatial")  # spatial | global | unet | FPN | transformer
     if enc_type == "spatial":
         net = SpatialEncoder.from_conf(conf, **kwargs)
     elif enc_type == "global":
         net = ImageEncoder.from_conf(conf, **kwargs)
     elif enc_type == "unet":
         net = UNet(8)
+    elif enc_type == "transformer":
+        net = TransformerEncoder()
     else:
         raise NotImplementedError("Unsupported encoder type")
     return net

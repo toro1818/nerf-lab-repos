@@ -19,6 +19,7 @@ class PixelNeRFNet(torch.nn.Module):
         """
         super().__init__()
         self.encoder = make_encoder(conf["encoder"])
+        self.use_transformer = conf["encoder"].use_transformer # TODO
         self.use_encoder = conf.get_bool("use_encoder", True)  # Image features?
 
         self.use_xyz = conf.get_bool("use_xyz", False)
@@ -87,6 +88,7 @@ class PixelNeRFNet(torch.nn.Module):
         self.num_objs = 0
         self.num_views_per_obj = 1
 
+
     def encode(self, images, poses, focal, z_bounds=None, c=None):
         """
         :param images (NS, 3, H, W)
@@ -108,8 +110,10 @@ class PixelNeRFNet(torch.nn.Module):
             poses = poses.reshape(-1, 4, 4)
         else:
             self.num_views_per_obj = 1
-
-        self.encoder(images)
+        if self.use_transformer:
+            self.encoder(images,nv=self.num_views_per_obj) # 如果使用transformer，需要获得nv信息，然后只在nv之间做注意力机制
+        else:
+            self.encoder(images)
         rot = poses[:, :3, :3].transpose(1, 2)  # (B, 3, 3)
         trans = -torch.bmm(rot, poses[:, :3, 3:])  # (B, 3, 1)
         self.poses = torch.cat((rot, trans), dim=-1)  # (B, 3, 4)
