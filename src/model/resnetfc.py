@@ -188,8 +188,8 @@ class ResnetFC(nn.Module):
         # PyHocon construction
         return cls(
             d_in,
-            n_blocks=conf.get_int("n_blocks", 5),
-            d_hidden=conf.get_int("d_hidden", 128),
+            n_blocks=conf.get_int("n_blocks", 3), # ÁíÒ»¸öÅäÖÃ 5x128
+            d_hidden=conf.get_int("d_hidden", 512),
             beta=conf.get_float("beta", 0.0),
             combine_layer=conf.get_int("combine_layer", 1000),
             combine_type=conf.get_string("combine_type", "average"),  # average | max
