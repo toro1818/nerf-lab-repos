@@ -11,7 +11,7 @@ from src.model.custom_encoder import ConvEncoder
 import torch.autograd.profiler as profiler
 from src.model.module import CBAMLayer
 from src.model.img_encoder import UNet4transformer
-from src.model.transformer import FMT_with_pathway
+from src.model.transformer import FMT_with_pathway, FeatureMatchTransformer
 
 
 class TransformerEncoder(nn.Module):
@@ -20,13 +20,13 @@ class TransformerEncoder(nn.Module):
     """
 
     def __init__(
-        self,
-        feature_net="unet",
-        base_channels=8,
-        index_interp="bilinear",
-        index_padding="border",
-        upsample_interp="bilinear",
-        feature_scale=1.0,
+            self,
+            feature_net="unet",
+            base_channels=8,
+            index_interp="bilinear",
+            index_padding="border",
+            upsample_interp="bilinear",
+            feature_scale=1.0,
     ):
         """
         :param feature_net feature extract network. Here I will reuse the spatial | unet | global | FPN
@@ -38,14 +38,13 @@ class TransformerEncoder(nn.Module):
         :param norm_type norm type to applied; pretrained model must use batch
         """
         super().__init__()
-        self.latent = None
-        if feature_net == "unet": # spatial | global | unet | FPN
+        if feature_net == "unet":  # spatial | global | unet | FPN
             self.feature_net = UNet4transformer(base_channels=base_channels)
         # Transformer
-        self.FMT_with_pathway = FMT_with_pathway()
+        self.FeatureMatchTransformer = FeatureMatchTransformer()
 
         self.feature_scale = feature_scale
-        self.latent_size = 56 # todo 暂时固定写
+        self.latent_size = 56  # todo 暂时固定写
 
         self.index_interp = index_interp
         self.index_padding = index_padding
@@ -62,6 +61,16 @@ class TransformerEncoder(nn.Module):
         self.smooth_1 = nn.Conv2d(base_channels * 2, base_channels * 2, 3, padding=1, bias=False)
         self.smooth_2 = nn.Conv2d(base_channels * 1, base_channels * 1, 3, padding=1, bias=False)
 
+    def _upsample_add(self, x, y):
+        """_upsample_add. Upsample and add two feature maps.
+
+        :param x: top feature map to be upsampled.
+        :param y: lateral feature map.
+        """
+
+        _, _, H, W = y.size()
+        return F.interpolate(x, size=(H, W), mode='bilinear') + y
+
     def index(self, uv, cam_z=None, image_size=(), z_bounds=None):
         """
         Get pixel-aligned image features at 2D image coordinates
@@ -77,6 +86,7 @@ class TransformerEncoder(nn.Module):
                 uv = uv.expand(self.latent.shape[0], -1, -1)
 
             # 因为此处使用torch.nn.functional.grid_sample进行采样，坐标需要进行归一化，所以uv坐标需要÷(H,W) TODO
+            # 但是latent_scaling没看懂 TODO
             with profiler.record_function("encoder_index_pre"):
                 if len(image_size) > 0:
                     if len(image_size) == 1:
@@ -86,8 +96,8 @@ class TransformerEncoder(nn.Module):
 
             uv = uv.unsqueeze(2)  # (B, N, 1, 2)
             samples = F.grid_sample(
-                self.latent, # input: (NB*NV,latent_size,H/2,W/2)=(9,512,150,200)
-                uv, # grid: (NB*NV,ray_batch_size*sample,1,2)(9,8192,1,2)
+                self.latent,  # input: (NB*NV,latent_size,H/2,W/2)=(9,512,150,200)
+                uv,  # grid: (NB*NV,ray_batch_size*sample,1,2)(9,8192,1,2)
                 align_corners=True,
                 mode=self.index_interp,
                 padding_mode=self.index_padding,
@@ -114,21 +124,39 @@ class TransformerEncoder(nn.Module):
         x = x.to(device=self.latent.device)
         B, C, H, W = x.size()
         x = x.reshape(B // nv, nv, C, H, W).permute(1, 0, 2, 3, 4)
-        x_lists = [x[i] for i in range(nv)]
-        # 1. feature extract
+        x_lists = [x[i] for i in range(nv)]  # NV x [B//NV,C,H,W ]
+        # 1. feature extract  -- NV x {stage1:(B//NV,32,H/4,W/4), stage2:(B//NV,16,H/2,W/2), stage3:(B//NV,8,H,W)}
         feature_lists = [self.feature_net(x_lists[i]) for i in range(nv)]
-        # 2. transformer: only apply on stage1
+        # 2. transformer: only apply on stage1  -- NV x [B//NV,C,H,W ]
         feature_lists_stage1 = [feature_mul_stage["stage1"] for feature_mul_stage in feature_lists]
-        feature_lists_stage1 = self.FMT_with_pathway(feature_lists_stage1)
+        feature_lists_stage1 = self.FeatureMatchTransformer(feature_lists_stage1)
 
         # 3. smooth + upsample: to transmit info from stage1(after transformer) to stage2,3
         latents = []
-        for idx,feature_lists in enumerate(feature_lists):
-            feature_lists[idx]["stage1"] = feature_lists_stage1[idx]
-            feature_lists[idx]["stage2"] = self.smooth_1(self._upsample_add(self.dim_reduction_1(feature_lists[idx]["stage1"]),feature_lists[idx]["stage2"]))
-            feature_lists[idx]["stage3"] = self.smooth_2(self._upsample_add(self.dim_reduction_2(feature_lists[idx]["stage2"]),feature_lists[idx]["stage3"]))
-            latents.append(torch.cat(feature_lists[idx], dim=1).unsqueeze(1)) # dim channel
-        self.latent = torch.cat(latents,dim=1).reshape(B, C, H, W)
+        for idx, feature_multi_stages in enumerate(feature_lists):
+            feature_multi_stages["stage1"] = feature_lists_stage1[idx]
+            feature_multi_stages["stage2"] = self.smooth_1(
+                self._upsample_add(self.dim_reduction_1(feature_multi_stages["stage1"]), feature_multi_stages["stage2"]))
+            feature_multi_stages["stage3"] = self.smooth_2(
+                self._upsample_add(self.dim_reduction_2(feature_multi_stages["stage2"]), feature_multi_stages["stage3"]))
+
+            latents_one_view = list(feature_multi_stages.values())
+            align_corners = None if self.index_interp == "nearest " else True
+            latent_sz = latents_one_view[-1].shape[-2:]
+            for i in range(len(latents_one_view)):
+                latents_one_view[i] = F.interpolate(
+                    latents_one_view[i],
+                    latent_sz,
+                    mode=self.upsample_interp,
+                    align_corners=align_corners,
+                )
+            latents.append(torch.cat(latents_one_view, dim=1).unsqueeze(1))
+        self.latent = torch.cat(latents, dim=1).reshape(B, self.latent_size, H, W)
+        # TODO 我知道是归一化，但是这里第三步看不懂
+        self.latent_scaling[0] = self.latent.shape[-1]
+        self.latent_scaling[1] = self.latent.shape[-2]
+        self.latent_scaling = self.latent_scaling / (self.latent_scaling - 1) * 2.0  # 没有看懂
+
         return self.latent
 
     @classmethod
@@ -141,23 +169,24 @@ class TransformerEncoder(nn.Module):
             feature_scale=conf.get_float("feature_scale", 1.0),
         )
 
+
 class SpatialEncoder(nn.Module):
     """
     2D (Spatial/Pixel-aligned/local) image encoder
     """
 
     def __init__(
-        self,
-        backbone="resnet34",
-        pretrained=True,
-        num_layers=4,
-        index_interp="bilinear",
-        index_padding="border",
-        upsample_interp="bilinear",
-        feature_scale=1.0,
-        use_first_pool=True,
-        norm_type="batch",
-        use_cbam=False,
+            self,
+            backbone="resnet34",
+            pretrained=True,
+            num_layers=4,
+            index_interp="bilinear",
+            index_padding="border",
+            upsample_interp="bilinear",
+            feature_scale=1.0,
+            use_first_pool=True,
+            norm_type="batch",
+            use_cbam=False,
     ):
         """
         :param backbone Backbone network. Either custom, in which case
@@ -240,8 +269,8 @@ class SpatialEncoder(nn.Module):
 
             uv = uv.unsqueeze(2)  # (B, N, 1, 2)
             samples = F.grid_sample(
-                self.latent, # input: (NB*NV,latent_size,H/2,W/2)=(9,512,150,200)
-                uv, # grid: (NB*NV,ray_batch_size*sample,1,2)(9,8192,1,2)
+                self.latent,  # input: (NB*NV,latent_size,H/2,W/2)=(9,512,150,200)
+                uv,  # grid: (NB*NV,ray_batch_size*sample,1,2)(9,8192,1,2)
                 align_corners=True,
                 mode=self.index_interp,
                 padding_mode=self.index_padding,
@@ -323,7 +352,7 @@ class SpatialEncoder(nn.Module):
             upsample_interp=conf.get_string("upsample_interp", "bilinear"),
             feature_scale=conf.get_float("feature_scale", 1.0),
             use_first_pool=conf.get_bool("use_first_pool", True),
-            use_cbam=conf.get_bool("use_cbam", False), # TODO, remember to change when eval if dont use conf
+            use_cbam=conf.get_bool("use_cbam", False),  # TODO, remember to change when eval if dont use conf
         )
 
 
@@ -347,7 +376,6 @@ class ImageEncoder(nn.Module):
         self.latent_size = latent_size
         if latent_size != 512:
             self.fc = nn.Linear(512, latent_size)
-
 
     def index(self, uv, cam_z=None, image_size=(), z_bounds=()):
         """
