@@ -235,6 +235,7 @@ class Trainer:
                             batch == self.num_total_batches - 1
                             or batch % self.accu_grad == self.accu_grad - 1
                     ):
+                        torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)  # ½Ø¶ÏÌÝ¶È
                         self.optim.step()
                         self.optim.zero_grad()
 
