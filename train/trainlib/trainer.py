@@ -202,7 +202,6 @@ class Trainer:
                             )
                         torch.save({"iter": step_id + 1}, self.iter_state_path)
                         self.extra_save_state()
-
                     if batch % self.vis_interval == 0:
                         print("generating visualization")
                         if self.fixed_test:
@@ -230,12 +229,22 @@ class Trainer:
                                 ),
                                 vis_u8,
                             )
+                    # saving per 5k iter
+                    if step_id % 5000 == 0 and step_id > 20000:
+                        print("saving per 5k iter")
+                        ckpt_dir = os.path.join(self.args.checkpoints_path, self.args.name, 'save')
+                        if not os.path.exists(ckpt_dir):
+                            os.mkdir(ckpt_dir)
+                        ckpt_path = os.path.join(ckpt_dir, str(step_id//1000)+'k')
+                        torch.save(
+                            self.net.state_dict(),ckpt_path
+                        )
 
                     if (
                             batch == self.num_total_batches - 1
                             or batch % self.accu_grad == self.accu_grad - 1
                     ):
-                        torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)  # ½Ø¶ÏÌÝ¶È
+                        torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
                         self.optim.step()
                         self.optim.zero_grad()
 
