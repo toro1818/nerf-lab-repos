@@ -18,7 +18,7 @@ class Trainer:
             batch_size=args.batch_size,  # default=4 "Object batch size ('SB')"
             shuffle=True,
             num_workers=0,
-            #num_workers=8,
+            # num_workers=8,
             pin_memory=False,
         )
         self.test_data_loader = torch.utils.data.DataLoader(
@@ -48,10 +48,16 @@ class Trainer:
 
         # Currently only Adam supported
         self.optim = torch.optim.Adam(net.parameters(), lr=args.lr)
+
         if args.gamma != 1.0:
-            self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer=self.optim, gamma=args.gamma
-            )
+            if args.lr_scheduler == 'ExponentialLR':
+                self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+                    optimizer=self.optim, gamma=args.gamma  # 0.98
+                )
+            elif args.lr_scheduler == 'MultiStepLR':
+                self.lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                    optimizer=self.optim, milestones=[70, 100], gamma=args.gamma  # 0.5 normally
+                )
         else:
             self.lr_scheduler = None
 
@@ -235,9 +241,9 @@ class Trainer:
                         ckpt_dir = os.path.join(self.args.checkpoints_path, self.args.name, 'save')
                         if not os.path.exists(ckpt_dir):
                             os.mkdir(ckpt_dir)
-                        ckpt_path = os.path.join(ckpt_dir, str(step_id//1000)+'k')
+                        ckpt_path = os.path.join(ckpt_dir, str(step_id // 1000) + 'k')
                         torch.save(
-                            self.net.state_dict(),ckpt_path
+                            self.net.state_dict(), ckpt_path
                         )
 
                     if (
