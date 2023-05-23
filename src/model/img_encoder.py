@@ -144,7 +144,7 @@ class UNet(nn.Module):
         self.index_interp = "bilinear"
         self.upsample_interp = "bilinear"
         self.latent = None
-        self.latent_size = 56 # todo 暂时固定写
+        self.latent_size = base_channels * 7 # todo 暂时固定写
         self.conv0 = nn.Sequential(
             Conv2d(3, base_channels, 3, stride=1, padding=1),
             Conv2d(base_channels, base_channels, 3, stride=1, padding=1)
@@ -268,10 +268,10 @@ class UNet4transformer(nn.Module):
         conv2 = self.conv2(conv1)
         pre_features = conv2
         outputs = {}
-        outputs["stage1"] = self.out1(pre_features)
+        outputs["stage1"] = self.out1(pre_features)  # (b,32,H/4,W/4)
         pre_features = self.deconv1(conv1, pre_features)
-        outputs["stage2"] = self.out2(pre_features)
+        outputs["stage2"] = self.out2(pre_features)  # (b,16,H/2,W/2)
         pre_features = self.deconv2(conv0, pre_features)
-        outputs["stage3"] = self.out3(pre_features)
+        outputs["stage3"] = self.out3(pre_features)  # (b,8,H,W)
 
         return outputs

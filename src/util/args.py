@@ -14,6 +14,7 @@ def parse_args(
     default_data_format="dvr",
     default_num_epochs=10000000,
     default_lr=1e-4,
+    default_lr_scheduler='ExponentialLR',  # ExponentialLR | MultiStepLR
     # default_gamma=1.00,
     default_gamma=0.99,
     default_datadir="dataset",
@@ -74,7 +75,7 @@ def parse_args(
         "--ray_batch_size", "-R", type=int, default=default_ray_batch_size, help="Ray batch size"
     )
     parser.add_argument(
-        "--lr_scheduler", type=str, default='ExponentialLR', help="lr_scheduler type(ExponentialLR | MultiStepLR)"
+        "--lr_scheduler", type=str, default=default_lr_scheduler, help="lr_scheduler type(ExponentialLR | MultiStepLR)"
     )
 
     if callback is not None:

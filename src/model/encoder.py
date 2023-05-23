@@ -11,7 +11,7 @@ from src.model.custom_encoder import ConvEncoder
 import torch.autograd.profiler as profiler
 from src.model.module import CBAMLayer
 from src.model.img_encoder import UNet4transformer
-from src.model.transformer import FMT_with_pathway, FeatureMatchTransformer
+from src.model.transformer import FeatureMatchTransformer
 
 
 class TransformerEncoder(nn.Module):
@@ -39,6 +39,8 @@ class TransformerEncoder(nn.Module):
         """
         super().__init__()
         if feature_net == "unet":  # spatial | global | unet | FPN
+            self.feature_net = UNet4transformer(base_channels=base_channels)
+        elif feature_net == "resnet":  # resnet | global | unet | FPN
             self.feature_net = UNet4transformer(base_channels=base_channels)
         # Transformer
         self.FeatureMatchTransformer = FeatureMatchTransformer()
@@ -300,20 +302,20 @@ class SpatialEncoder(nn.Module):
         else:
             x = self.model.conv1(x)
             x = self.model.bn1(x)
-            x = self.model.relu(x)
+            x = self.model.relu(x)  # (b,64,H/2,W/2)
 
             latents = [x]
             if self.num_layers > 1:
                 if self.use_first_pool:
                     x = self.model.maxpool(x)
                 x = self.model.layer1(x)
-                latents.append(x)
+                latents.append(x)  # (b,64,H/4,W/4)
             if self.num_layers > 2:
                 x = self.model.layer2(x)
-                latents.append(x)
+                latents.append(x)  # (b,128,H/8,W/8)
             if self.num_layers > 3:
                 x = self.model.layer3(x)
-                latents.append(x)
+                latents.append(x)  # (b,256,H/16,W/16)
             if self.num_layers > 4:
                 x = self.model.layer4(x)
                 latents.append(x)
@@ -418,4 +420,91 @@ class ImageEncoder(nn.Module):
             conf.get_string("backbone"),
             pretrained=conf.get_bool("pretrained", True),
             latent_size=conf.get_int("latent_size", 128),
+        )
+
+
+class SpatialEncoder4Transformer(nn.Module):
+    """
+    2D (Spatial/Pixel-aligned/local) image encoder
+    """
+
+    def __init__(
+            self,
+            backbone="resnet34",
+            pretrained=True,
+            num_layers=4,
+            index_interp="bilinear",
+            index_padding="border",
+            upsample_interp="bilinear",
+            use_first_pool=True,
+            norm_type="batch",
+    ):
+        super().__init__()
+
+        if norm_type != "batch":
+            assert not pretrained
+
+        self.use_first_pool = use_first_pool
+        norm_layer = util.get_norm_layer(norm_type)
+
+        print("Using torchvision", backbone, "encoder")
+        self.model = getattr(torchvision.models, backbone)(
+            pretrained=pretrained, norm_layer=norm_layer
+        )
+        # Following 2 lines need to be uncommented for older configs
+        self.model.fc = nn.Sequential()
+        self.model.avgpool = nn.Sequential()
+        self.latent_size = [0, 64, 128, 256, 512, 1024][num_layers]
+
+        self.num_layers = num_layers
+        self.index_interp = index_interp
+        self.index_padding = index_padding
+        self.upsample_interp = upsample_interp
+        self.register_buffer("latent", torch.empty(1, 1, 1, 1), persistent=False)
+        self.register_buffer(
+            "latent_scaling", torch.empty(2, dtype=torch.float32), persistent=False
+        )
+        # self.latent (B, L, H, W)
+
+    def forward(self, x):
+        """
+        For extracting ResNet's features.
+        :param x image (B, C, H, W)
+        :return latent (B, latent_size, H, W) B=NB*NV, latent_size = 512 (default)
+        """
+        x = x.to(device=self.latent.device)
+
+        x = self.model.conv1(x)
+        x = self.model.bn1(x)
+        x = self.model.relu(x)  # (b,64,H/2,W/2)
+
+        latents = [x]
+        if self.num_layers > 1:
+            if self.use_first_pool:
+                x = self.model.maxpool(x)
+            x = self.model.layer1(x)
+            latents.append(x)  # (b,64,H/4,W/4)
+        if self.num_layers > 2:
+            x = self.model.layer2(x)
+            latents.append(x)  # (b,128,H/8,W/8)
+        if self.num_layers > 3:
+            x = self.model.layer3(x)
+            latents.append(x)  # (b,256,H/16,W/16)
+        if self.num_layers > 4:
+            x = self.model.layer4(x)
+            latents.append(x)
+
+        self.latents = latents
+        return self.latent
+
+    @classmethod
+    def from_conf(cls, conf):
+        return cls(
+            conf.get_string("backbone"),
+            pretrained=conf.get_bool("pretrained", True),
+            num_layers=conf.get_int("num_layers", 4),
+            index_interp=conf.get_string("index_interp", "bilinear"),
+            index_padding=conf.get_string("index_padding", "border"),
+            upsample_interp=conf.get_string("upsample_interp", "bilinear"),
+            use_first_pool=conf.get_bool("use_first_pool", True),
         )

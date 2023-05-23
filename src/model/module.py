@@ -38,6 +38,8 @@ class CBAMLayer(nn.Module):
         x = spatial_out * x
         return x
 
+
+# pos encode for transformer
 class PositionEncodingSuperGule(nn.Module):
     def __init__(self,d_model):
         super().__init__()
