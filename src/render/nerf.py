@@ -225,7 +225,6 @@ class NeRFRenderer(torch.nn.Module):
             if self.training and self.noise_std > 0.0:
                 sigmas = sigmas + torch.randn_like(sigmas) * self.noise_std
 
-            # TODO nerf公式对照着看看
             alphas = 1 - torch.exp(-deltas * torch.relu(sigmas))  # (B, K)
             deltas = None
             sigmas = None

@@ -43,10 +43,11 @@ class TransformerEncoder(nn.Module):
         elif feature_net == "resnet":  # resnet | global | unet | FPN
             self.feature_net = UNet4transformer(base_channels=base_channels)
         # Transformer
-        self.FeatureMatchTransformer = FeatureMatchTransformer()
+        self.FeatureMatchTransformer = FeatureMatchTransformer(
+                    d_model=base_channels*4, nhead=8, num_layers=4, type=0)  # base_channels*4 / 8 should be integer
 
         self.feature_scale = feature_scale
-        self.latent_size = 56  # todo 暂时固定写
+        self.latent_size = 7 * base_channels  # todo 暂时固定写
 
         self.index_interp = index_interp
         self.index_padding = index_padding

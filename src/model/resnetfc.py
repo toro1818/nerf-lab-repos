@@ -104,13 +104,13 @@ class ResnetFC(nn.Module):
         self.use_spade = use_spade
 
         self.blocks = nn.ModuleList(
-            [ResnetBlockFC(d_hidden, beta=beta) for i in range(n_blocks)]
+            [ResnetBlockFC(d_hidden, beta=beta) for _ in range(n_blocks)]
         )
 
         if d_latent != 0:
             n_lin_z = min(combine_layer, n_blocks)
             self.lin_z = nn.ModuleList(
-                [nn.Linear(d_latent, d_hidden) for i in range(n_lin_z)]
+                [nn.Linear(d_latent, d_hidden) for _ in range(n_lin_z)]
             )
             for i in range(n_lin_z):
                 nn.init.constant_(self.lin_z[i].bias, 0.0)

@@ -111,7 +111,7 @@ class EncoderLayer(nn.Module):
 
 
 class FeatureMatchTransformer(nn.Module):
-    def __init__(self, d_model=32, nhead=8, num_layers=4):
+    def __init__(self, d_model=32, nhead=8, num_layers=4, type=0):
         super(FeatureMatchTransformer, self).__init__()
 
         self.d_model = d_model  # default 32
@@ -122,6 +122,7 @@ class FeatureMatchTransformer(nn.Module):
 
         # self.pos_encoding = PositionEncodingSuperGule(d_model)
         self.pos_encoding = PositionEncodingSine(d_model)
+        self.type = type
 
     def _reset_parameters(self):
         for p in self.parameters():
@@ -140,16 +141,31 @@ class FeatureMatchTransformer(nn.Module):
             feature_list[i] = einops.rearrange(self.pos_encoding(feature_list[i]), 'n c h w -> n (h w) c')
         # attention layer
         for layer in self.layers:
-            # self attention
-            for idx in range(view_nums):
-                feature_list[idx] = layer(feature_list[idx], feature_list[idx])
-            # cross attention
-            tmp_list = [_.clone() for _ in feature_list]
-            for ref_idx in range(view_nums):
-                for src_idx in range(view_nums):
-                    if ref_idx == src_idx: continue
-                    tmp_list[ref_idx] = layer(tmp_list[ref_idx], feature_list[src_idx])
-            feature_list = tmp_list
+            # type0£ºparallel calculate and take mean as output (see note type0)
+            if self.type == 0:
+                # self attention
+                for idx in range(view_nums):
+                    feature_list[idx] = layer(feature_list[idx], feature_list[idx])
+                # cross attention
+                tmp_list = [_.clone() for _ in feature_list]
+                for ref_idx in range(view_nums):
+                    tmp = torch.zeros_like(feature_list[0])
+                    for src_idx in range(view_nums):
+                        if ref_idx == src_idx: continue
+                        tmp += layer(tmp_list[ref_idx], tmp_list[src_idx])
+                    feature_list[ref_idx] = tmp/(view_nums-1) # mean
+            # type1£ºsequential serial calculate and take the last as output (see note type1)
+            if self.type == 1:
+                # self attention
+                for idx in range(view_nums):
+                    feature_list[idx] = layer(feature_list[idx], feature_list[idx])
+                # cross attention
+                tmp_list = [_.clone() for _ in feature_list]
+                for ref_idx in range(view_nums):
+                    for src_idx in range(view_nums):
+                        if ref_idx == src_idx: continue
+                        tmp_list[ref_idx] = layer(tmp_list[ref_idx], feature_list[src_idx])
+                feature_list = tmp_list
 
         for i in range(view_nums):
             feature_list[i] = einops.rearrange(feature_list[i], 'n (h w) c -> n c h w', h=H)

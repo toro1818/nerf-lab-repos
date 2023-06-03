@@ -24,9 +24,10 @@ def make_encoder(conf, **kwargs):
     elif enc_type == "global":
         net = ImageEncoder.from_conf(conf, **kwargs)
     elif enc_type == "unet":
-        net = UNet(8)
+        net = UNet(16)
     elif enc_type == "transformer":
-        net = TransformerEncoder()
+        net = TransformerEncoder(feature_net="unet", base_channels=8)
     else:
         raise NotImplementedError("Unsupported encoder type")
+    print("Use --"+enc_type+"-- as image encoder")
     return net
