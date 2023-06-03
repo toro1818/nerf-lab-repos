@@ -6,7 +6,7 @@ from .encoder import ImageEncoder
 from .code import PositionalEncoding
 from .model_util import make_encoder, make_mlp
 import torch.autograd.profiler as profiler
-from src.util import repeat_interleave
+from src.util import repeat_interleave, get_freq_reg_mask
 import os
 import os.path as osp
 import warnings
@@ -20,6 +20,7 @@ class PixelNeRFNet(torch.nn.Module):
         super().__init__()
         self.encoder = make_encoder(conf["encoder"])
         self.use_transformer = conf["encoder"].use_transformer  # TODO
+        self.use_freq_reg = conf.use_freq_reg  # use_freq_reg ?
         self.use_encoder = conf.get_bool("use_encoder", True)  # Image features?
 
         self.use_xyz = conf.get_bool("use_xyz", False)
@@ -49,22 +50,13 @@ class PixelNeRFNet(torch.nn.Module):
         d_latent = self.encoder.latent_size if self.use_encoder else 0
         d_in = 3 if self.use_xyz else 1
 
-        if self.use_viewdirs and self.use_code_viewdirs:
-            # Apply positional encoding to viewdirs
-            d_in += 3
-        if self.use_code and d_in > 0:
+        if self.use_code:
             # Positional encoding for x,y,z OR view z
-            self.code = PositionalEncoding.from_conf(conf["code"], d_in=d_in)
-            d_in = self.code.d_out
-        if self.use_viewdirs and not self.use_code_viewdirs:
-            # Don't apply positional encoding to viewdirs (concat after encoded)
-            d_in += 3
-
-        if self.use_global_encoder:
-            # Global image feature
-            self.global_encoder = ImageEncoder.from_conf(conf["global_encoder"])
-            self.global_latent_size = self.global_encoder.latent_size
-            d_latent += self.global_latent_size
+            self.code_xyz = PositionalEncoding.from_conf(conf["code_xyz"], d_in=3)
+            d_in = self.code_xyz.d_out
+            if self.use_viewdirs and self.use_code_viewdirs:
+                self.code_view = PositionalEncoding.from_conf(conf["code_view"], d_in=3)
+                d_in = self.code_xyz.d_out + self.code_view.d_out
 
         d_out = 4
 
@@ -84,14 +76,13 @@ class PixelNeRFNet(torch.nn.Module):
         self.register_buffer("focal", torch.empty(1, 2), persistent=False)
         # Principal point
         self.register_buffer("c", torch.empty(1, 2), persistent=False)
-
         self.num_objs = 0
         self.num_views_per_obj = 1
 
     def encode(self, images, poses, focal, z_bounds=None, c=None, global_step=0, total_reg_step=5e5):
         """
-        :param total_reg_step: for compatibility
-        :param global_step:for compatibility
+        :param total_reg_step: Regularization termination time
+        :param global_step: current step
         :param images (NS, 3, H, W)
         NS is number of input (aka source or reference) views
         :param poses (NS, 4, 4)
@@ -149,6 +140,11 @@ class PixelNeRFNet(torch.nn.Module):
         if self.use_global_encoder:
             self.global_encoder(images)
 
+        # use freq reg
+        if self.use_freq_reg:
+            self.global_step = global_step
+            self.total_reg_step = total_reg_step
+
     def forward(self, xyz, coarse=True, viewdirs=None, far=False):
         """
         Predict (r, g, b, sigma) at world space points xyz.
@@ -183,9 +179,13 @@ class PixelNeRFNet(torch.nn.Module):
                     else:
                         z_feature = -xyz[..., 2].reshape(-1, 1)  # (SB*B, 1)
 
-                if self.use_code and not self.use_code_viewdirs:
+                if self.use_code:
                     # Positional encoding (no viewdirs)
-                    z_feature = self.code(z_feature)
+                    z_feature = self.code_xyz(z_feature)
+                    if self.use_freq_reg:
+                        xyz_mask = get_freq_reg_mask(self.code_xyz.d_out, self.global_step, self.total_reg_step).to(z_feature)
+                        z_feature = z_feature * xyz_mask
+
 
                 if self.use_viewdirs:
                     # * Encode the view directions
@@ -197,13 +197,14 @@ class PixelNeRFNet(torch.nn.Module):
                         self.poses[:, None, :3, :3], viewdirs
                     )  # (SB*NS, B, 3, 1)
                     viewdirs = viewdirs.reshape(-1, 3)  # (SB*B, 3)
+                    if self.use_code and self.use_code_viewdirs:
+                        viewdirs = self.code_view(viewdirs)
+                        if self.use_freq_reg:
+                            view_mask = get_freq_reg_mask(self.code_view.d_out, self.global_step, self.total_reg_step).to(viewdirs)
+                            viewdirs = viewdirs * view_mask
                     z_feature = torch.cat(
                         (z_feature, viewdirs), dim=1
                     )  # (SB*B, 4 or 6)
-
-                if self.use_code and self.use_code_viewdirs:
-                    # Positional encoding (with viewdirs)
-                    z_feature = self.code(z_feature)
 
                 mlp_input = z_feature
 
@@ -231,14 +232,6 @@ class PixelNeRFNet(torch.nn.Module):
                     mlp_input = latent
                 else:
                     mlp_input = torch.cat((latent, z_feature), dim=-1)
-
-            if self.use_global_encoder:
-                # Concat global latent code if enabled
-                global_latent = self.global_encoder.latent
-                assert mlp_input.shape[0] % global_latent.shape[0] == 0
-                num_repeats = mlp_input.shape[0] // global_latent.shape[0]
-                global_latent = repeat_interleave(global_latent, num_repeats)
-                mlp_input = torch.cat((global_latent, mlp_input), dim=-1)
 
             # Camera frustum culling stuff, currently disabled
             combine_index = None

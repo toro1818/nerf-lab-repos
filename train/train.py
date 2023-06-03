@@ -113,7 +113,7 @@ class PixelNeRFTrainer(trainlib.Trainer):
     def extra_save_state(self):
         torch.save(renderer.state_dict(), self.renderer_state_path)
 
-    def calc_losses(self, data, is_train=True, global_step=0):
+    def calc_losses(self, data, is_train=True, global_step=0,total_reg_step=5e5):
         if "images" not in data:
             return {}
         all_images = data["images"].to(device=device)  # (SB, NV, 3, H, W)
@@ -193,6 +193,8 @@ class PixelNeRFTrainer(trainlib.Trainer):
             src_poses,
             all_focals.to(device=device),
             c=all_c.to(device=device) if all_c is not None else None,
+            global_step = global_step,
+            total_reg_step = total_reg_step
         )
         # DotMap(coarse:{'rgb':,'depth','weight'},fine:{same})
         render_dict = DotMap(render_par(all_rays, want_weights=True,))
