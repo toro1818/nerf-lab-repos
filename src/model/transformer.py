@@ -152,7 +152,7 @@ class FeatureMatchTransformer(nn.Module):
                     tmp = torch.zeros_like(feature_list[0])
                     for src_idx in range(view_nums):
                         if ref_idx == src_idx: continue
-                        # tmp += layer(tmp_list[ref_idx], tmp_list[src_idx])
+                        # tmp += layer(tmp_list[ref_idx], tmp_list[src_idx]) # fatal mistake
                         tmp += layer(tmp_list[src_idx], tmp_list[ref_idx])
                     feature_list[ref_idx] = tmp/(view_nums-1) # mean
             # type1£ºsequential serial calculate and take the last as output (see note type1)
