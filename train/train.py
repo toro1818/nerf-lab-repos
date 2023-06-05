@@ -113,7 +113,7 @@ class PixelNeRFTrainer(trainlib.Trainer):
     def extra_save_state(self):
         torch.save(renderer.state_dict(), self.renderer_state_path)
 
-    def calc_losses(self, data, is_train=True, global_step=0,total_reg_step=5e5):
+    def calc_losses(self, data, is_train=True, global_step=0,total_reg_step=conf['model'].total_reg_step):
         if "images" not in data:
             return {}
         all_images = data["images"].to(device=device)  # (SB, NV, 3, H, W)

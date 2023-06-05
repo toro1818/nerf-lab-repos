@@ -54,9 +54,11 @@ class PixelNeRFNet(torch.nn.Module):
             # Positional encoding for x,y,z OR view z
             self.code_xyz = PositionalEncoding.from_conf(conf["code_xyz"], d_in=3)
             d_in = self.code_xyz.d_out
-            if self.use_viewdirs and self.use_code_viewdirs:
-                self.code_view = PositionalEncoding.from_conf(conf["code_view"], d_in=3)
-                d_in = self.code_xyz.d_out + self.code_view.d_out
+            if self.use_viewdirs:
+                d_in = d_in +3
+                if self.use_code_viewdirs:
+                    self.code_view = PositionalEncoding.from_conf(conf["code_view"], d_in=3)
+                    d_in = self.code_xyz.d_out + self.code_view.d_out
 
         d_out = 4
 
