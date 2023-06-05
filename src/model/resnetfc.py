@@ -74,6 +74,7 @@ class ResnetFC(nn.Module):
         combine_layer=1000,
         combine_type="average",
         use_spade=False,
+        **kwargs
     ):
         """
         :param d_in input size
@@ -181,6 +182,7 @@ class ResnetFC(nn.Module):
 
                 x = self.blocks[blkid](x)
             out = self.lin_out(self.activation(x))
+            # print(out.size())
             return out
 
     @classmethod

@@ -2,14 +2,17 @@ from .encoder import SpatialEncoder, ImageEncoder, TransformerEncoder
 from .mlp import ImplicitNet
 from .resnetfc import ResnetFC
 from .img_encoder import UNet
+from .mlp_separate import MLP
 
 
 def make_mlp(conf, d_in, d_latent=0, allow_empty=False, **kwargs):
-    mlp_type = conf.get_string("type", "mlp")  # mlp | resnet
+    mlp_type = conf.get_string("type", "mlp")  # mlp | resnet | mlp_separate
     if mlp_type == "mlp":
         net = ImplicitNet.from_conf(conf, d_in + d_latent, **kwargs)
     elif mlp_type == "resnet":
         net = ResnetFC.from_conf(conf, d_in, d_latent=d_latent, **kwargs)
+    elif mlp_type == "mlp_separate":
+        net = MLP.from_conf(conf, d_in, d_latent=d_latent, **kwargs)
     elif mlp_type == "empty" and allow_empty:
         net = None
     else:

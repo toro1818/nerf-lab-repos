@@ -59,6 +59,7 @@ class PixelNeRFNet(torch.nn.Module):
         if self.use_viewdirs and not self.use_code_viewdirs:
             # Don't apply positional encoding to viewdirs (concat after encoded)
             d_in += 3
+            d_in_views = 3
 
         if self.use_global_encoder:
             # Global image feature
@@ -69,9 +70,9 @@ class PixelNeRFNet(torch.nn.Module):
         d_out = 4
 
         self.latent_size = self.encoder.latent_size
-        self.mlp_coarse = make_mlp(conf["mlp_coarse"], d_in, d_latent, d_out=d_out)
+        self.mlp_coarse = make_mlp(conf["mlp_coarse"], d_in, d_latent, d_in_views=d_in_views, d_out=d_out)
         self.mlp_fine = make_mlp(
-            conf["mlp_fine"], d_in, d_latent, d_out=d_out, allow_empty=True
+            conf["mlp_fine"], d_in, d_latent, d_in_views=d_in_views, d_out=d_out, allow_empty=True
         )
         # Note: this is world -> camera, and bottom row is omitted
         # saved in model.state_dict but not update
