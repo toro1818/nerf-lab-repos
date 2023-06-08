@@ -134,6 +134,7 @@ class FeatureMatchTransformer(nn.Module):
         :param feature_list: NV x (b,C,H,W)  b=B//nv
         :return:
         """
+        print(id(feature_list[0]))
         view_nums = len(feature_list)
         _, _, H, _ = feature_list[0].shape
         # pos_encoding

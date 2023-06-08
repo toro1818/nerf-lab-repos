@@ -29,7 +29,7 @@ def make_encoder(conf, **kwargs):
     elif enc_type == "unet":
         net = UNet(16)
     elif enc_type == "transformer":
-        net = TransformerEncoder(feature_net="unet", base_channels=8)
+        net = TransformerEncoder(feature_net="FPN", base_channels=8)
     else:
         raise NotImplementedError("Unsupported encoder type")
     print("Use --"+enc_type+"-- as image encoder")

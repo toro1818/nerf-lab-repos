@@ -10,7 +10,7 @@ import src.util as util
 from src.model.custom_encoder import ConvEncoder
 import torch.autograd.profiler as profiler
 from src.model.module import CBAMLayer
-from src.model.img_encoder import UNet4transformer
+from src.model.img_encoder import UNet4transformer,FeatureNet
 from src.model.transformer import FeatureMatchTransformer
 
 
@@ -42,9 +42,11 @@ class TransformerEncoder(nn.Module):
             self.feature_net = UNet4transformer(base_channels=base_channels)
         elif feature_net == "resnet":  # resnet | global | unet | FPN
             self.feature_net = UNet4transformer(base_channels=base_channels)
+        elif feature_net == "FPN":  # resnet | global | unet | FPN
+            self.feature_net = FeatureNet(base_channels=base_channels)
         # Transformer
         self.FeatureMatchTransformer = FeatureMatchTransformer(
-                    d_model=base_channels*4, nhead=8, num_layers=4, type=0)  # base_channels*4 / 8 should be integer
+                    d_model=base_channels*4, nhead=8, num_layers=3, type=0)  # base_channels*4 / 8 should be integer
 
         self.feature_scale = feature_scale
         self.latent_size = 7 * base_channels  # todo 暂时固定写

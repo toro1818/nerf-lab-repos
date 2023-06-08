@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from .dcn import DCN
 
 def init_bn(module):
     if module.weight is not None:
@@ -35,7 +35,7 @@ class Conv2d(nn.Module):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 relu=True, bn=True, bn_momentum=0.1, init_method="xavier",**kwargs):
+                 relu=True, bn=True, bn_momentum=0.1, init_method="xavier", **kwargs):
         super(Conv2d, self).__init__()
 
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride,
@@ -44,7 +44,6 @@ class Conv2d(nn.Module):
         self.stride = stride
         self.bn = nn.BatchNorm2d(out_channels, momentum=bn_momentum) if bn else None
         self.relu = relu
-
 
         # assert init_method in ["kaiming", "xavier"]
         # self.init_weights(init_method)
@@ -139,12 +138,13 @@ class UNet(nn.Module):
            base_channels: u-net base channels
 
     """
+
     def __init__(self, base_channels=8, ):
         super(UNet, self).__init__()
         self.index_interp = "bilinear"
         self.upsample_interp = "bilinear"
         self.latent = None
-        self.latent_size = base_channels * 7 # todo 暂时固定写
+        self.latent_size = base_channels * 7  # todo 暂时固定写
         self.conv0 = nn.Sequential(
             Conv2d(3, base_channels, 3, stride=1, padding=1),
             Conv2d(base_channels, base_channels, 3, stride=1, padding=1)
@@ -192,8 +192,8 @@ class UNet(nn.Module):
 
         uv = uv.unsqueeze(2)  # (B, N, 1, 2)
         samples = F.grid_sample(
-            self.latent, # input: (NB*NV,latent_size,H/2,W/2)=(9,512,150,200)
-            uv, # grid: (NB*NV,ray_batch_size*sample,1,2)(9,8192,1,2)
+            self.latent,  # input: (NB*NV,latent_size,H/2,W/2)=(9,512,150,200)
+            uv,  # grid: (NB*NV,ray_batch_size*sample,1,2)(9,8192,1,2)
             align_corners=True,
             mode="bilinear",
             padding_mode="border",
@@ -212,7 +212,6 @@ class UNet(nn.Module):
         latents.append(self.out2(pre_features))
         pre_features = self.deconv2(conv0, pre_features)
         latents.append(self.out3(pre_features))
-
 
         # 暂时只使用最后的输出
         latent_sz = latents[2].shape[-2:]
@@ -236,6 +235,7 @@ class UNet4transformer(nn.Module):
            base_channels: u-net base channels
 
     """
+
     def __init__(self, base_channels=8, ):
         super(UNet4transformer, self).__init__()
         self.conv0 = nn.Sequential(
@@ -262,6 +262,13 @@ class UNet4transformer(nn.Module):
         self.out_channels.append(2 * base_channels)
         self.out_channels.append(base_channels)
 
+        self._reset_parameters()  # xavier_uniform init
+
+    def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
     def forward(self, x):
         conv0 = self.conv0(x)
         conv1 = self.conv1(conv0)
@@ -273,5 +280,85 @@ class UNet4transformer(nn.Module):
         outputs["stage2"] = self.out2(pre_features)  # (b,16,H/2,W/2)
         pre_features = self.deconv2(conv0, pre_features)
         outputs["stage3"] = self.out3(pre_features)  # (b,8,H,W)
+
+        return outputs
+
+
+class FeatureNet(nn.Module):
+    def __init__(self, base_channels):
+        super(FeatureNet, self).__init__()
+        self.base_channels = base_channels
+
+        self.conv0 = nn.Sequential(
+            Conv2d(3, base_channels, 3, 1, padding=1),
+            Conv2d(base_channels, base_channels, 3, 1, padding=1))
+
+        self.conv1 = nn.Sequential(
+            Conv2d(base_channels, base_channels * 2, 5, stride=2, padding=2),
+            Conv2d(base_channels * 2, base_channels * 2, 3, 1, padding=1),
+            Conv2d(base_channels * 2, base_channels * 2, 3, 1, padding=1))
+
+        self.conv2 = nn.Sequential(
+            Conv2d(base_channels * 2, base_channels * 4, 5, stride=2, padding=2),
+            Conv2d(base_channels * 4, base_channels * 4, 3, 1, padding=1),
+            Conv2d(base_channels * 4, base_channels * 4, 3, 1, padding=1))
+
+        self.out1 = nn.Sequential(
+            Conv2d(base_channels * 4, base_channels * 4, 1),
+            DCN(in_channels=base_channels * 4, out_channels=base_channels * 4, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(base_channels * 4),
+            nn.ReLU(inplace=True),
+            DCN(in_channels=base_channels * 4, out_channels=base_channels * 4, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(base_channels * 4),
+            nn.ReLU(inplace=True),
+            DCN(in_channels=base_channels * 4, out_channels=base_channels * 4, kernel_size=3, stride=1, padding=1))
+
+        final_chs = base_channels * 4
+        self.inner1 = nn.Conv2d(base_channels * 2, final_chs, 1, bias=True)
+        self.inner2 = nn.Conv2d(base_channels * 1, final_chs, 1, bias=True)
+
+        self.out2 = nn.Sequential(
+            Conv2d(final_chs, final_chs, 3, 1, padding=1),
+            DCN(in_channels=final_chs, out_channels=final_chs, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(final_chs),
+            nn.ReLU(inplace=True),
+            DCN(in_channels=final_chs, out_channels=final_chs, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(final_chs),
+            nn.ReLU(inplace=True),
+            DCN(in_channels=final_chs, out_channels=base_channels * 2, kernel_size=3, stride=1, padding=1),
+        )
+        self.out3 = nn.Sequential(
+            Conv2d(final_chs, final_chs, 3, 1, padding=1),
+            DCN(in_channels=final_chs, out_channels=final_chs, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(final_chs),
+            nn.ReLU(inplace=True),
+            DCN(in_channels=final_chs, out_channels=final_chs, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(final_chs),
+            nn.ReLU(inplace=True),
+            DCN(in_channels=final_chs, out_channels=base_channels, kernel_size=3, stride=1, padding=1))
+
+        self.out_channels = [4 * base_channels, base_channels * 2, base_channels]
+
+    def forward(self, x):
+        """forward.
+
+        :param x: [B, C, H, W]
+        :return outputs: stage1 [B, 32， 128， 160], stage2 [B, 16, 256, 320], stage3 [B, 8, 512, 640]
+        """
+        conv0 = self.conv0(x)
+        conv1 = self.conv1(conv0)
+        conv2 = self.conv2(conv1)
+
+        intra_feat = conv2
+        outputs = {}
+        out = self.out1(intra_feat)
+        outputs["stage1"] = out
+        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="nearest") + self.inner1(conv1)
+        out = self.out2(intra_feat)
+        outputs["stage2"] = out
+
+        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="nearest") + self.inner2(conv0)
+        out = self.out3(intra_feat)
+        outputs["stage3"] = out
 
         return outputs
